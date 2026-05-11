@@ -49,7 +49,7 @@ export class AuthGuard implements CanActivate {
   private async verifyToken(token: string) {
     try {
       const payload = await this.jwtService.verifyAsync(token, {
-        secret: this.configService.get<string>('jwt.access_key'),
+        secret: this.configService.get<string>('ACC_T_SC'),
       });
 
       return payload;
@@ -59,6 +59,7 @@ export class AuthGuard implements CanActivate {
       }
 
       if (error instanceof JsonWebTokenError) {
+        console.log(error)
         throw new ConflictException('Token is invalid');
       }
 

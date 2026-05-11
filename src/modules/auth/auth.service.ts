@@ -2,17 +2,18 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from '../users/models/user.model';
 import { Model } from 'mongoose';
-import bcrypt from 'bcrypt';
+import * as bcrypt from 'bcrypt';
 import { SignUpDto } from './dtos/sign-up.dto';
 import { SignInDto } from './dtos/sign-in.dto';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, TokenExpiredError } from '@nestjs/jwt';
 import { UserRoles } from '@/core/constants/constants';
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { Response, Request } from 'express';
 
 @Injectable()
 export class AuthService {
@@ -35,12 +36,12 @@ export class AuthService {
       throw new ConflictException('Password mismatch');
     }
 
-    const accessToken = this.generateAccessToken({
+    const accessToken = await this.generateAccessToken({
       id: existing.id,
       role: existing.role,
     });
 
-    const refreshToken = this.generateRefreshToken({
+    const refreshToken = await this.generateRefreshToken({
       id: existing.id,
       role: existing.role,
     });
@@ -71,12 +72,12 @@ export class AuthService {
       password: await this.hashPass(payload.password),
     });
 
-    const accessToken = this.generateAccessToken({
+    const accessToken = await this.generateAccessToken({
       id: user.id,
       role: user.role,
     });
 
-    const refreshToken = this.generateRefreshToken({
+    const refreshToken = await this.generateRefreshToken({
       id: user.id,
       role: user.role,
     });
@@ -94,19 +95,52 @@ export class AuthService {
     });
   }
 
-  async refresh() {}
+  async refresh(req: Request, res: Response) {
+  const token = req.signedCookies?.['refreshToken'];
+
+  if (!token) {
+    throw new UnauthorizedException('Refresh token not given');
+  }
+
+  let payload: { id: string; role: UserRoles };
+
+  try {
+    payload = await this.jwtService.verifyAsync(token, {
+      secret: this.configService.get<string>('REF_T_SC'),
+    });
+  } catch (error) {
+    if (error instanceof TokenExpiredError) {
+      throw new UnauthorizedException('Refresh token expired, please login again');
+    }
+    throw new UnauthorizedException('Refresh token is invalid');
+  }
+
+  const accessToken = await this.generateAccessToken({
+    id: payload.id,
+    role: payload.role,
+  });
+
+  res.cookie('accessToken', accessToken, {
+    signed: true,
+    expires: new Date(
+      Date.now() + (this.configService.get<number>('ACC_T_EX') || 0) * 1000,
+    ),
+  });
+
+  return res.json({ success: true });
+}
 
   async forgotPass() {}
 
   async resetPass() {}
 
   private async hashPass(pass: string): Promise<string> {
-    const hPass = bcrypt.hash(pass, 10);
+    const hPass = await bcrypt.hash(pass, 10);
     return hPass;
   }
 
   private async comparePass(orPass: string, hPass: string): Promise<boolean> {
-    const isSame = bcrypt.compare(orPass, hPass);
+    const isSame = await bcrypt.compare(orPass, hPass);
     return isSame;
   }
 
